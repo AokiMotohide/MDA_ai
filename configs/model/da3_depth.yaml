@@ -1,0 +1,36 @@
+_target_: src.training.multiview_dust3r_module_onlydepth.MultiViewDUSt3RLitModule
+
+pretrained: null
+saved_path: null
+resume_from_checkpoint: ${ckpt_path}
+
+eval_use_pts3d_from_local_head: true
+
+train_criterion:
+  _target_: src.training.losses.MultiLossRGB
+
+validation_criterion:
+  _target_: src.training.losses.MultiLossRGB
+
+optimizer:
+  _target_: torch.optim.AdamW
+  _partial_: true
+  lr: 1e-4
+  betas: 
+    - 0.9
+    - 0.95
+  weight_decay: 0.05
+
+scheduler:
+  _target_: pl_bolts.optimizers.lr_scheduler.LinearWarmupCosineAnnealingLR
+  _partial_: true
+  warmup_epochs: 10
+  max_epochs: ${trainer.max_epochs}
+  eta_min: 1e-06
+
+net:
+  _target_: src.training.da3_wrapper.DA3Wrapper
+  config_path: src/depth_anything_3/configs/da3-giant.yaml
+
+# compile model for faster training with pytorch 2.0
+compile: false
