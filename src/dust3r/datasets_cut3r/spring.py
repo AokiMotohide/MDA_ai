@@ -164,8 +164,3 @@ class Spring(BaseMultiViewDataset):
             )
         assert len(views) == num_views
         return views, 0
-
-if __name__ == "__main__":
-    dataset = Spring(ROOT="data/cut3r_data/processed_spring/train/", num_views=4, resolution=256, rand_sampling=False)
-    print(len(dataset))
-    print(dataset[0])

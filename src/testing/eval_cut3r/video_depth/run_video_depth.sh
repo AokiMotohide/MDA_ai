@@ -7,7 +7,7 @@ workdir='.'
 # Model checkpoints are resolved by src/testing/utils/model_choice.py from the
 # --model_name (download them first: hf download sy000/MDA --local-dir checkpoints/MDA).
 model_names=('mda_mog_sky_l2')
-PYTHON=/nfs/turbo/coe-jungaocv/siyuanb/miniconda3/envs/da3/bin/python
+PYTHON=python
 
 datasets=('sintel' 'bonn' 'kitti' 'diode')
 

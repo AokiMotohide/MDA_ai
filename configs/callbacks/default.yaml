@@ -6,7 +6,7 @@ defaults:
   - _self_
 
 model_checkpoint:
-  dirpath: /home/siyuanb/data/DA3_data/${paths.run_folder_name}
+  dirpath: ${paths.output_dir}/checkpoints
   filename: "epoch_{epoch:03d}"
   monitor: "val/loss"
   mode: "min"

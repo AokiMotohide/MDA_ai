@@ -4,7 +4,6 @@ import numpy as np
 from PIL import Image
 import torch
 import sys
-import matplotlib.pyplot as plt
 import json
 import random
 
@@ -186,47 +185,3 @@ class LayeredDepth_Multi(BaseMultiViewDataset):
             )
         assert len(views) == num_views
         return views, [0]
-
-
-if __name__ == "__main__":
-    # Example usage and visualization
-    # Set the ROOT path via environment variable or default to a local path
-    root_path = "/nfs/turbo/coe-jungaocv-turbo2/shared_data/tmp/LayeredDepth/layered_depth"
-    dataset = LayeredDepth_Multi(ROOT=root_path, split="train", resolution=(504, 378))
-    print(f"Dataset length: {len(dataset)}")
-
-    num_to_viz = min(5, len(dataset))
-    if num_to_viz > 0:
-        fig, axes = plt.subplots(num_to_viz, 3, figsize=(15, 5 * num_to_viz))
-
-        for i in range(num_to_viz):
-            idx = i * (len(dataset) // num_to_viz)  # Spread samples across dataset
-            sample = dataset[idx]
-            view = sample[0]
-
-            row_axes = axes[i] if num_to_viz > 1 else axes
-
-            # Visualize RGB
-            rgb = view["img"].permute(1, 2, 0).cpu().numpy()
-            rgb = (rgb - rgb.min()) / (rgb.max() - rgb.min() + 1e-8)
-            row_axes[0].imshow(rgb)
-            row_axes[0].set_title(f"RGB {view['label']}")
-
-            # Visualize Primary Depth
-            depth = view["depthmap"]
-            if torch.is_tensor(depth):
-                depth = depth.cpu().numpy()
-            row_axes[1].imshow(depth)
-            row_axes[1].set_title(f"Primary Depth {idx}")
-
-            # Visualize Extra Depths (Merged)
-            extra_depth = view["extra_depthmap"]
-            if torch.is_tensor(extra_depth):
-                extra_depth = extra_depth.cpu().numpy()
-            row_axes[2].imshow(extra_depth)
-            row_axes[2].set_title("Extra Depth")
-
-        plt.tight_layout()
-        save_path = "layered_depth_samples_visualization.png"
-        fig.savefig(save_path)
-        print(f"Saved visualization of {num_to_viz} samples to {save_path}")

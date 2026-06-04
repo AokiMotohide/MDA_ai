@@ -43,6 +43,7 @@ dependencies = [
     "moviepy==1.0.3",
     "typer>=0.9.0",
     "pycolmap",
+    "viser",
 ]
 
 [project.optional-dependencies]

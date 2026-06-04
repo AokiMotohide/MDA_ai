@@ -4,7 +4,7 @@ workdir='.'
 # Boundary-blur ablation. Checkpoints resolve from --model_name via
 # src/testing/utils/model_choice.py (hf download sy000/MDA --local-dir checkpoints/MDA).
 model_names=('mda_mog_sky_l2')
-PYTHON=/nfs/turbo/coe-jungaocv/siyuanb/miniconda3/envs/da3/bin/python
+PYTHON=python
 
 for model_name in "${model_names[@]}"; do
     output_dir="${workdir}/eval_results/mv_recon_blur/${model_name}"

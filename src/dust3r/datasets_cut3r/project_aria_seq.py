@@ -1,6 +1,3 @@
-# Copyright (C) 2024-present Naver Corporation. All rights reserved.
-# Licensed under CC BY-NC-SA 4.0 (non-commercial use only).
-#
 # --------------------------------------------------------
 # Dataloader for preprocessed project-aria dataset
 # --------------------------------------------------------
@@ -21,8 +18,7 @@ class Aria_Seq(BaseMultiViewDataset):
 
     def __init__(
         self,
-        ROOT="/home/share/public_nas/Dataset/3D_scene/cut3r/processed_ase_2k",
-        #  num_views=2,
+        ROOT="data/cut3r_data/processed_ase_2k",
         scene_name=None,  # specify scene name(s) to load
         sample_freq=1,  # stride of the frmaes inside the sliding window
         start_freq=1,  # start frequency for the sliding window
@@ -38,7 +34,6 @@ class Aria_Seq(BaseMultiViewDataset):
         self.ROOT = ROOT
         self.sample_freq = sample_freq
         self.start_freq = start_freq
-        # self.num_views = num_views
         self.is_metric = True
         self.depth_is_distance = depth_is_distance
 
@@ -90,7 +85,6 @@ class Aria_Seq(BaseMultiViewDataset):
         num_count = 0
         for id, scene_name in enumerate(self.scene_names):
             scene_dir = os.path.join(self.ROOT, scene_name)
-            # print(id, scene_name)
             image_names = os.listdir(os.path.join(scene_dir, "color"))
             image_names = sorted(image_names)
             intrinsic = np.loadtxt(
@@ -112,9 +106,7 @@ class Aria_Seq(BaseMultiViewDataset):
                 id,
             ] * image_num
             num_count += image_num
-        # print(self.sceneids, self.scene_names)
         self.intrinsics = np.stack(self.intrinsics, axis=0)
-        print(self.intrinsics.shape)
         assert len(self.sceneids) == len(
             self.images
         ), f"{len(self.sceneids)}, {len(self.images)}"
@@ -158,7 +150,6 @@ class Aria_Seq(BaseMultiViewDataset):
     def _get_views(self, idx, resolution, rng, num_views):
 
         image_idxes = self.get_img_idxes(idx, rng, num_views)
-        # print(image_idxes)
         views = []
         for view_idx in image_idxes:
             scene_id = self.sceneids[view_idx]
@@ -187,9 +178,6 @@ class Aria_Seq(BaseMultiViewDataset):
                 depthmap = self._distance_to_z_depth(depthmap, intrinsics)
             depthmap[depthmap > 20] = 0  # invalid
 
-            # rgb_image, depthmap, intrinsics = self._crop_resize_if_necessary(
-            #     rgb_image, depthmap, intrinsics, resolution, rng=rng, info=view_idx
-            # )
             depth_complete = depthmap.copy()
             rgb_image, depthmap, depth_complete, intrinsics = self._crop_resize_if_necessary2(
                 rgb_image, depthmap, depth_complete, intrinsics, resolution, rng, info=view_idx
@@ -218,51 +206,4 @@ class Aria_Seq(BaseMultiViewDataset):
                     sky_mask=np.zeros_like(depthmap).astype(np.float32),
                 )
             )
-        # print([view['label'] for view in views])
         return views, 0
-
-
-if __name__ == "__main__":
-    import trimesh
-
-    num_views = 8
-    # dataset = Aria_Seq(resolution=(224,224),
-    #                              num_views=num_views,
-    #                              start_freq=1, sample_freq=2)
-    dataset = Aria_Seq(
-        split="train",
-        resolution=(224, 224),
-        num_views=num_views,
-        start_freq=1,
-        rand_sel=True,
-        winsize=16,
-        sel_num=3,
-    )
-    save_dir = "visualization/aria_seq_views"
-    os.makedirs(save_dir, exist_ok=True)
-
-    for idx in np.random.permutation(len(dataset))[:10]:
-        os.makedirs(osp.join(save_dir, str(idx)), exist_ok=True)
-        views = dataset[(idx, 0)]
-        assert len(views) == num_views
-        all_pts = []
-        all_color = []
-        for i, view in enumerate(views):
-            img = np.array(view["img"]).transpose(1, 2, 0)
-            # save_path = osp.join(save_dir, str(idx), f"{'_'.join(view_name(view).split('/')[1:])}.jpg")
-            save_path = osp.join(save_dir, str(idx), f"{i}_{view['label']}")
-            # img=cv2.COLOR_RGB2BGR(img)
-            img = img[..., ::-1]
-            img = (img + 1) / 2
-            cv2.imwrite(save_path, img * 255)
-            print(f"save to {save_path}")
-            img = img[..., ::-1]
-            pts3d = np.array(view["pts3d"]).reshape(-1, 3)
-            pct = trimesh.PointCloud(pts3d, colors=img.reshape(-1, 3))
-            pct.export(save_path.replace(".jpg", ".ply"))
-            all_pts.append(pts3d)
-            all_color.append(img.reshape(-1, 3))
-        all_pts = np.concatenate(all_pts, axis=0)
-        all_color = np.concatenate(all_color, axis=0)
-        pct = trimesh.PointCloud(all_pts, all_color)
-        pct.export(osp.join(save_dir, str(idx), f"all.ply"))

@@ -76,23 +76,31 @@ This places two checkpoints:
 
 ### 💻 Run the demo
 
-`src/testing/run_demo.sh` wraps `src/testing/run_inference_video.py`. It takes either a folder of images or a single video file. For a video, it extracts frames with `ffmpeg` first.
+`demo.py` takes a folder of images, a single video file (frames extracted with `ffmpeg`), or a single image (monocular inference). All settings live in the `DemoConfig` at the top of the file; every field is also a CLI flag.
 
 ```bash
-# 1. Video file (frames extracted to a temp dir, removed on exit).
-bash src/testing/run_demo.sh assets/examples/parkour_video.mp4 \
-    --output_dir eval_results/demo/parkour --fps 5
+# 1. Bundled multi-view examples (video frames or unordered indoor stills).
+python demo.py assets/examples/dolomiti
+python demo.py assets/examples/diode_indoor
 
-# 2. Folder of images.
-bash src/testing/run_demo.sh path/to/image_folder
+# 2. Single-image (monocular) example.
+python demo.py assets/examples/mono/painting/painting.jpeg
 
-# 3. Use the VGGT model instead of the default DA3 model.
-bash src/testing/run_demo.sh assets/examples/parkour_video.mp4 \
-    --model_name vggt_mog_l2 \
-    --output_dir eval_results/demo/my_scene
+# 3. Your own data.
+python demo.py path/to/video.mp4 --fps 5
+python demo.py path/to/image_folder --image_stride 10   # keep every 10th image
+python demo.py path/to/image_folder --model_name vggt_mog_l2
 ```
 
-The default model is `mda_mog_sky_l2`. Override it with `--model_name` (see the table above, or `src/testing/utils/model_choice.py` for all names). Outputs go to `--output_dir`, which defaults to `eval_results/demo/<input_basename>/`: per-frame depth maps, an optional side-view point cloud `.ply`, and per-frame `cameras.npz`.
+The default model is `mda_mog_sky_l2`. Override it with `--model_name` (see the table above, or `src/testing/utils/model_choice.py` for all names). Outputs go to `--output_dir` (default `eval_results/demo/<input_basename>/<model_name>/`):
+
+After inference, an interactive viser point-cloud viewer launches automatically (disable with `--no-viewer`). To browse several finished runs in one viewer with a dropdown:
+
+```bash
+python view.py --data_dir eval_results/demo --method mda_mog_sky_l2
+```
+
+The original shell pipeline (`src/testing/run_demo.sh` wrapping `src/testing/run_inference_video.py`) is still available for the `.ply`-export flow.
 
 ## 🏋️ Training
 

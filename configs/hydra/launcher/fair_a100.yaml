@@ -6,9 +6,9 @@ _target_: hydra_plugins.hydra_submitit_launcher.submitit_launcher.SlurmLauncher
 submitit_folder: ${hydra.sweep.dir}/.submitit/%j
 name: ${hydra.job.name}
 timeout_min: 20160 # 14 days : 60 * 24 * 14
-account: cortex
-qos: cortex_high
-comment: "multiview_dust3r experiment"
+account: your_slurm_account
+qos: your_slurm_qos
+comment: "mda experiment"
 nodes: 1
 gres: "gpu:8"
 tasks_per_node: 8
@@ -20,7 +20,7 @@ array_parallelism: 256     # Maximum number of jobs running in parallel
 # Useful to add parameters which are not currently available in the plugin.
 # Eg: {"mail-user": "blublu@fb.com", "mail-type": "BEGIN"}
 additional_parameters:
-  mail-user: "jianingy@meta.com"
+  mail-user: "your_email@example.com"
   mail-type: "BEGIN,END"
   output: "/path/to/slurm_out/%x-%j.out"
 
@@ -32,7 +32,7 @@ setup: # A list of commands to run in sbatch befure running srun
   - export RDZV_ID=$SLURM_JOBID
   - export OMP_NUM_THREADS=12
   - . /path/to/miniforge3/etc/profile.d/conda.sh  # activate conda
-  - conda activate dust3r
+  - conda activate mda
   - cd /path/to/project  # cd to the project directory
   - export NCCL_DEBUG=INFO
   - export PYTHONFAULTHANDLER=1
