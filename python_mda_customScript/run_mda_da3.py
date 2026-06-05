@@ -153,12 +153,30 @@ def parse_args() -> argparse.Namespace:
     )
     parser.set_defaults(show_cam=True)
 
-    parser.add_argument("--size", type=int, default=512, help="MDA推論の長辺サイズ")
+    parser.add_argument("--size", type=int, default=518, help="MDA推論の長辺サイズ")
     parser.add_argument(
         "--max-chunk",
         type=int,
-        default=1,
-        help="1回のforwardに入れる最大フレーム数。小さいほど省VRAM",
+        default=0,
+        help="1回のforwardに入れる最大フレーム数。0なら全画像を同一forwardに入れる",
+    )
+    parser.add_argument(
+        "--max-images",
+        type=int,
+        default=0,
+        help="使用する最大画像枚数。0なら全画像を使用し、>0なら始点・終点を含めて均等間引き",
+    )
+    parser.add_argument(
+        "--oom-action",
+        choices=("exit", "lower-size"),
+        default="exit",
+        help="CUDA OOM時の動作。exit=終了、lower-size=解像度を下げて1回だけ再実行",
+    )
+    parser.add_argument(
+        "--retry-size",
+        type=int,
+        default=384,
+        help="--oom-action lower-size の再実行で使う長辺サイズ",
     )
     parser.add_argument(
         "--model-name",
@@ -176,10 +194,19 @@ def parse_args() -> argparse.Namespace:
         default=1_000_000,
         help="GLBに残す最大点数",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.max_chunk < 0:
+        parser.error("--max-chunk must be 0 or a positive integer")
+    if args.max_images < 0:
+        parser.error("--max-images must be 0 or a positive integer")
+    if args.size <= 0:
+        parser.error("--size must be a positive integer")
+    if args.retry_size <= 0:
+        parser.error("--retry-size must be a positive integer")
+    return args
 
 
-def print_config(args: argparse.Namespace, num_images: int) -> None:
+def print_config(args: argparse.Namespace, total_images: int, selected_images: int) -> None:
     line = "=" * 68
     print()
     print(line)
@@ -187,11 +214,19 @@ def print_config(args: argparse.Namespace, num_images: int) -> None:
     print(line)
     print(f"  MDA root              : {MDA_ROOT}")
     print(f"  入力画像フォルダ      : {args.image_folder}")
-    print(f"  検出した画像枚数      : {num_images} 枚")
+    print(f"  検出した画像枚数      : {total_images} 枚")
+    print(f"  使用する画像枚数      : {selected_images} 枚")
     print(f"  使用モデル            : {args.model_name}")
     print(f"  想定conda環境         : {args.env_name}")
     print(f"  推論サイズ            : {args.size}")
-    print(f"  max_chunk             : {args.max_chunk}")
+    print(f"  OOM時動作             : {args.oom_action}")
+    if args.oom_action == "lower-size":
+        print(f"  OOM再試行サイズ       : {args.retry_size}")
+    if args.max_chunk == 0:
+        print(f"  max_chunk             : 0 (全{selected_images}枚を同一forward)")
+    else:
+        print(f"  max_chunk             : {args.max_chunk}")
+    print(f"  max_images            : {args.max_images}")
     print(f"  信頼度フィルタ        : conf_thres = {args.conf_thres:.1f}")
     print(f"  空マスク              : {'ON' if args.mask_sky else 'OFF'}")
     print(f"  黒背景マスク          : {'ON' if args.mask_black_bg else 'OFF'}")
@@ -224,6 +259,16 @@ def collect_image_paths(image_folder: str) -> list[str]:
     for pattern in IMAGE_EXTS:
         paths.extend(glob.glob(os.path.join(image_folder, pattern)))
     return sorted(paths)
+
+
+def select_image_subset(image_paths: list[str], max_images: int) -> list[str]:
+    if max_images <= 0 or max_images >= len(image_paths):
+        return image_paths
+    if max_images == 1:
+        return [image_paths[0]]
+
+    indices = np.linspace(0, len(image_paths) - 1, max_images, dtype=int).tolist()
+    return [image_paths[i] for i in indices]
 
 
 def load_original_sizes(image_paths: list[str]) -> dict[str, tuple[int, int]]:
@@ -275,7 +320,15 @@ def run_mda_inference(args: argparse.Namespace, image_paths: list[str]) -> dict:
 
     start = time.time()
     chunk_predictions = []
-    max_chunk = max(1, args.max_chunk)
+    max_chunk = len(image_paths) if args.max_chunk == 0 else args.max_chunk
+    if max_chunk < len(image_paths):
+        print(
+            "WARNING: max_chunk が使用画像枚数より小さいため、"
+            "cross-frame attention が分割され、相対カメラ推定が弱くなる可能性があります。"
+        )
+    else:
+        print("INFO: 全画像を同一forwardに入れるmulti-view推論で実行します。")
+
     for chunk_start in range(0, len(image_paths), max_chunk):
         chunk_end = min(chunk_start + max_chunk, len(image_paths))
         print(f">> Inference on frames [{chunk_start}:{chunk_end}] of {len(image_paths)}")
@@ -490,16 +543,38 @@ def build_glb(
     return out_path
 
 
-def main() -> None:
-    args = parse_args()
-    image_folder = args.image_folder
-    image_paths = collect_image_paths(image_folder)
+def is_cuda_oom_error(error: BaseException) -> bool:
+    if isinstance(error, torch.cuda.OutOfMemoryError):
+        return True
+    text = str(error).lower()
+    return "cuda out of memory" in text or "cuda error: out of memory" in text
 
-    if not image_paths:
+
+def clear_cuda_cache() -> None:
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        try:
+            torch.cuda.ipc_collect()
+        except RuntimeError:
+            pass
+
+
+def run_pipeline(args: argparse.Namespace, image_folder: str, all_image_paths: list[str]) -> tuple[str, str]:
+    if not all_image_paths:
         print(f"ERROR: {image_folder} フォルダに画像が見つかりません。")
         sys.exit(1)
 
-    print_config(args, len(image_paths))
+    image_paths = select_image_subset(all_image_paths, args.max_images)
+    if len(image_paths) != len(all_image_paths):
+        print(
+            f"INFO: --max-images {args.max_images} により "
+            f"{len(all_image_paths)} 枚から {len(image_paths)} 枚を均等間引きして使用します。"
+        )
+        print("INFO: 使用画像:")
+        for path in image_paths:
+            print(f"   - {os.path.basename(path)}")
+
+    print_config(args, len(all_image_paths), len(image_paths))
     check_environment(args)
 
     original_sizes = load_original_sizes(image_paths)
@@ -537,8 +612,7 @@ def main() -> None:
         sky_mask=sky_mask,
     )
 
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+    clear_cuda_cache()
 
     emit_progress("done", 1.00, "すべて完了")
     print()
@@ -548,6 +622,43 @@ def main() -> None:
     print(f"  カメラJSON          : {json_path}")
     print(f"  GLBシーン           : {glb_path}")
     print("=" * 68)
+    return json_path, glb_path
+
+
+def main() -> None:
+    args = parse_args()
+    image_folder = args.image_folder
+    all_image_paths = collect_image_paths(image_folder)
+
+    try:
+        run_pipeline(args, image_folder, all_image_paths)
+        return
+    except Exception as error:
+        if not is_cuda_oom_error(error):
+            raise
+        clear_cuda_cache()
+        print()
+        print("ERROR: CUDA out of memory が発生しました。")
+        print(f"   初回サイズ: {args.size}")
+        print(f"   OOM時動作 : {args.oom_action}")
+        if args.oom_action != "lower-size":
+            print("   再実行せず終了します。再試行する場合は --oom-action lower-size を指定してください。")
+            raise
+        if args.retry_size >= args.size:
+            print(
+                "   --retry-size が初回 --size 以上のため再実行できません。"
+                " 初回より小さい値を指定してください。"
+            )
+            raise
+
+    retry_args = argparse.Namespace(**vars(args))
+    retry_args.size = args.retry_size
+    print()
+    print(
+        f"INFO: --oom-action lower-size により、"
+        f"size {args.size} -> {retry_args.size} で1回だけ再実行します。"
+    )
+    run_pipeline(retry_args, image_folder, all_image_paths)
 
 
 if __name__ == "__main__":

@@ -42,14 +42,23 @@ conda run -n mda python python_mda_customScript\run_mda_da3.py -i my_images
 | `--mask-black-bg` | OFF | 黒背景ピクセルを除外 |
 | `--mask-white-bg` | OFF | 白背景ピクセルを除外 |
 | `--no-show-cam` | OFF | GLB 内のカメラ可視化を無効化 |
-| `--size` | `512` | MDA 推論の長辺サイズ |
-| `--max-chunk` | `1` | 1 forward に入れる最大フレーム数 |
+| `--size` | `518` | MDA 推論の長辺サイズ。VGGT カスタムスクリプトの既定 target size と同じ |
+| `--max-chunk` | `0` | 1 forward に入れる最大フレーム数。`0` は全画像を同一 forward |
+| `--max-images` | `0` | 使用する最大画像枚数。`0` は全画像、`>0` は均等間引き |
+| `--oom-action` | `exit` | CUDA OOM 時の動作。`exit` または `lower-size` |
+| `--retry-size` | `384` | `--oom-action lower-size` の再実行サイズ |
 | `--model-name` | `mda_mog_sky_l2` | MDA model registry 名 |
 | `--env-name` | `mda` | 想定 conda 環境名の表示用 |
 | `--num-max-points` | `1000000` | GLB 点群の最大点数 |
 
-8GB VRAM 環境では `--max-chunk 1` が安定です。複数画像の相対カメラ推定を重視する場合は、
-VRAM に余裕がある範囲で `--max-chunk` を増やしてください。
+VGGT のような一体点群を狙う場合は、既定の `--max-chunk 0` のまま実行します。
+これは公式 `run_inference_video.py` と同じく、同一シーンの画像を single forward の multi-view mode に入れる使い方です。
+
+VGGT カスタムスクリプトは `load_and_preprocess_images()` の既定 `target_size=518` を使います。
+MDA 版も既定 `--size 518` に合わせていますが、MDA 側は入力画像比率と patch size の倍数に合わせて実際の処理解像度を丸めます。
+
+`--max-chunk 1` は省 VRAM 用ですが、各画像をほぼ独立推論するため cross-frame attention が切れます。
+相対カメラ推定が弱くなり、カメラ位置が同一点付近に潰れた点群になりやすいため、完成された空間を得たい場合は非推奨です。
 
 ## 出力
 
@@ -91,6 +100,15 @@ VRAM に余裕がある範囲で `--max-chunk` を増やしてください。
 - GLB のファイル名は同じですが、点群密度や見た目は VGGT と一致しません。
 - JSON schema は同じですが、モデルが異なるため数値は VGGT と一致しません。
 
+## DA3/MDA の3D構成
+
+DA3/MDA は古典的な特徴点マッチング、ICP、bundle adjustment で複数点群を後処理位置合わせする仕組みではありません。
+同一 forward の multi-view 推論で depth、confidence、intrinsics、extrinsics を推定し、そのカメラで各 depth map を world 座標へ unproject して結合します。
+
+GLB export の alignment は first camera 基準の glTF 座標変換と点群中心合わせです。
+これは表示用の座標整理であり、画像間の幾何対応を最適化する処理ではありません。
+DA3 標準 API には COLMAP 入力や pose-conditioned depth の経路もありますが、このカスタムスクリプトは VGGT JSON 互換を優先し、MDA DA3 の推定 camera/depth をそのまま使います。
+
 ## 進捗マーカー
 
 標準出力には VGGT 版と同じ形式の構造化マーカーを出します。
@@ -120,10 +138,13 @@ MDA repo root で以下を実行してください。
 
 ### `CUDA out of memory`
 
-- `--max-chunk 1` を使う
-- 入力画像枚数を減らす
-- `--size 384` などに下げる
+- 既定は `--oom-action exit` なので、OOM が出たら再実行せず終了します。
+- 1 回だけ解像度を下げて自動再実行する場合は `--oom-action lower-size --retry-size 384` を指定します。
+- それでも不足する場合は `--retry-size 336` など、さらに小さい値で手動再実行します。
 - 他の GPU プロセスを終了する
+
+`--max-chunk` を分割すると実行は通りやすくなりますが、相対カメラ推定が弱くなります。
+VGGT 的な一体点群を優先する場合は、chunk 分割より先に解像度を下げます。
 
 ### `No such operator xformers::swiglu_packedw`
 
@@ -138,8 +159,9 @@ conda run -n mda python demo.py assets\examples\mono\painting\painting.jpeg --mo
 
 ### 相対カメラ姿勢が弱い
 
-`--max-chunk 1` は省 VRAM ですが、フレーム間 attention を使いにくくなります。
-VRAM に余裕がある場合は `--max-chunk 2` 以上を試してください。
+`--max-chunk` が使用画像枚数より小さいと、フレーム間 attention が chunk ごとに分断されます。
+まず `--max-chunk 0` で全画像を同一 forward に入れてください。
+OOM する場合は `--oom-action lower-size --retry-size 384` のように解像度を下げます。
 
 ### `MDA root was not found`
 
