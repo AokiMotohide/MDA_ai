@@ -116,7 +116,7 @@ def parse_args() -> argparse.Namespace:
         "--conf-thres",
         "-c",
         type=float,
-        default=60.0,
+        default=70.0,
         help="信頼度フィルタ：下位X%%の低信頼度ポイントを除外する",
     )
 
@@ -133,7 +133,7 @@ def parse_args() -> argparse.Namespace:
         action="store_false",
         help="空領域除外を無効化",
     )
-    parser.set_defaults(mask_sky=True)
+    parser.set_defaults(mask_sky=False)
 
     parser.add_argument(
         "--mask-black-bg",
