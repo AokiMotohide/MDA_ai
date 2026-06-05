@@ -117,7 +117,7 @@ def parse_args() -> argparse.Namespace:
         "-c",
         type=float,
         default=70.0,
-        help="信頼度フィルタ：下位X%%の低信頼度ポイントを除外する",
+        help="信頼度フィルタ：上位X%%の高信頼度ポイントを使用する（70なら下位30%%を除外）",
     )
 
     sky_group = parser.add_mutually_exclusive_group()
@@ -203,6 +203,8 @@ def parse_args() -> argparse.Namespace:
         parser.error("--size must be a positive integer")
     if args.retry_size <= 0:
         parser.error("--retry-size must be a positive integer")
+    if not 0.0 <= args.conf_thres <= 100.0:
+        parser.error("--conf-thres must be between 0 and 100")
     return args
 
 
@@ -227,7 +229,11 @@ def print_config(args: argparse.Namespace, total_images: int, selected_images: i
     else:
         print(f"  max_chunk             : {args.max_chunk}")
     print(f"  max_images            : {args.max_images}")
-    print(f"  信頼度フィルタ        : conf_thres = {args.conf_thres:.1f}")
+    discard_pct = 100.0 - args.conf_thres
+    print(
+        f"  信頼度フィルタ        : conf_thres = {args.conf_thres:.1f} "
+        f"(上位 {args.conf_thres:.1f}% を使用 / 下位 {discard_pct:.1f}% を除外)"
+    )
     print(f"  空マスク              : {'ON' if args.mask_sky else 'OFF'}")
     print(f"  黒背景マスク          : {'ON' if args.mask_black_bg else 'OFF'}")
     print(f"  白背景マスク          : {'ON' if args.mask_white_bg else 'OFF'}")
@@ -463,13 +469,17 @@ def write_camera_json(
 
 
 def percentile_conf_threshold(conf: np.ndarray, base_mask: np.ndarray, conf_thres: float) -> float:
-    if conf_thres <= 0:
+    keep_pct = np.clip(conf_thres, 0.0, 100.0)
+    discard_pct = 100.0 - keep_pct
+    if keep_pct >= 100.0:
         return float("-inf")
+    if keep_pct <= 0.0:
+        return float("inf")
     valid_values = conf[base_mask]
     valid_values = valid_values[np.isfinite(valid_values)]
     if valid_values.size == 0:
         return float("inf")
-    return float(np.percentile(valid_values, np.clip(conf_thres, 0.0, 100.0)))
+    return float(np.percentile(valid_values, discard_pct))
 
 
 def build_glb(
@@ -498,7 +508,9 @@ def build_glb(
     emit_progress("save_glb", 0.90, "GLBファイルを生成中")
     print("▶ GLBファイルを生成中... (頂点数が多いと少し時間がかかります)")
     print(
-        f"   適用フィルタ: conf_thres={args.conf_thres}, mask_sky={args.mask_sky}, "
+        f"   適用フィルタ: conf_thres={args.conf_thres} "
+        f"(keep_top={args.conf_thres:.1f}%, discard_low={100.0 - args.conf_thres:.1f}%), "
+        f"mask_sky={args.mask_sky}, "
         f"mask_black_bg={args.mask_black_bg}, mask_white_bg={args.mask_white_bg}"
     )
 
