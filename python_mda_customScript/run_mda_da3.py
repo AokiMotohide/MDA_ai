@@ -12,6 +12,7 @@ import argparse
 import glob
 import json
 import os
+import site
 import sys
 import time
 from pathlib import Path
@@ -23,6 +24,31 @@ def emit_progress(phase: str, progress: float, msg: str = "") -> None:
 
 
 emit_progress("startup", 0.01, "Python起動中")
+
+
+def remove_user_site_packages() -> None:
+    """Prefer the active conda env over per-user Python packages."""
+    try:
+        user_sites = site.getusersitepackages()
+    except AttributeError:
+        user_sites = []
+    if isinstance(user_sites, str):
+        user_sites = [user_sites]
+
+    normalized_user_sites = {
+        os.path.normcase(os.path.abspath(path)) for path in user_sites
+    }
+    if not normalized_user_sites:
+        return
+
+    sys.path[:] = [
+        path
+        for path in sys.path
+        if os.path.normcase(os.path.abspath(path)) not in normalized_user_sites
+    ]
+
+
+remove_user_site_packages()
 
 
 def resolve_mda_root() -> Path:

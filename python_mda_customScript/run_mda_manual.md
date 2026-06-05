@@ -125,6 +125,17 @@ MDA repo root で以下を実行してください。
 - `--size 384` などに下げる
 - 他の GPU プロセスを終了する
 
+### `No such operator xformers::swiglu_packedw`
+
+conda 環境外のユーザー site-packages にある古い `xformers` を Python が拾うと発生します。
+`run_mda_da3.py` は起動時にユーザー site-packages を `sys.path` から外します。
+`demo.py` など別入口を直接実行する場合は、以下のようにユーザー site-packages を無効化してください。
+
+```powershell
+$env:PYTHONNOUSERSITE = "1"
+conda run -n mda python demo.py assets\examples\mono\painting\painting.jpeg --model_name mda_mog_sky_l2 --size 512 --max_chunk 1 --no-viewer
+```
+
 ### 相対カメラ姿勢が弱い
 
 `--max-chunk 1` は省 VRAM ですが、フレーム間 attention を使いにくくなります。
