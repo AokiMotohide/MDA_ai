@@ -116,8 +116,8 @@ def parse_args() -> argparse.Namespace:
         "--conf-thres",
         "-c",
         type=float,
-        default=90.0,
-        help="信頼度フィルタ：上位X%%の高信頼度ポイントを使用する（90なら下位10%%を除外）",
+        default=80.0,
+        help="信頼度フィルタ：上位X%%の高信頼度ポイントを使用する（80なら下位20%%を除外）",
     )
 
     sky_group = parser.add_mutually_exclusive_group()
