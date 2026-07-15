@@ -23,6 +23,11 @@ Common feed-forward depth models predict one depth value per pixel. At object ed
 
 ## 🚀 Quick Start
 
+### Windows の日本語ガイド
+
+- [環境構築ガイド](WINDOWS_BEGINNER_SETUP.md)
+- [再構成の実行ガイド](WINDOWS_RECONSTRUCTION_GUIDE.md)
+
 ### 📦 Installation
 
 MDA installs in two passes. The core package covers inference and the mixture-density head. A few extras are needed only for training, evaluation, or Gaussian-splatting export.
