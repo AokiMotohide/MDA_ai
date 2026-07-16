@@ -1,6 +1,6 @@
 # Windows 実行ガイド
 
-MDA DA3 と VGGT の実行方法、入力条件、パラメータ、出力ファイルを説明します。商用利用では `run_vggt_commercial.py` を使います。環境構築が終わっていない場合は先に [会社 PC 向け Windows 環境構築ガイド](WINDOWS_BEGINNER_SETUP.md) を実行します。
+MDA DA3 と VGGT の実行方法、入力条件、パラメータ、出力ファイルを説明します。商用利用では `run_vggt_commercial.py` を使います。会社 PC では、公式 MDA と社内配布のカスタムスクリプト ZIP を使って環境を構築します。詳細は [会社 PC 向け商用 VGGT 環境構築ガイド](WINDOWS_BEGINNER_SETUP.md) を参照します。
 
 ## 1. 入力画像を用意する
 

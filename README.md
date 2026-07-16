@@ -25,7 +25,7 @@ Common feed-forward depth models predict one depth value per pixel. At object ed
 
 ### Windows の日本語ガイド
 
-- [会社 PC 向け環境構築ガイド](WINDOWS_BEGINNER_SETUP.md)
+- [会社 PC 向け商用 VGGT 環境構築ガイド](WINDOWS_BEGINNER_SETUP.md)
 - [再構成の実行ガイド](WINDOWS_RECONSTRUCTION_GUIDE.md)
 
 ### 📦 Installation
