@@ -1,6 +1,6 @@
 # Windows 実行ガイド
 
-MDA DA3 と VGGT の実行方法、入力条件、パラメータ、出力ファイルを説明します。環境構築が終わっていない場合は先に [Windows 初心者向け環境構築ガイド](WINDOWS_BEGINNER_SETUP.md) を実行します。
+MDA DA3 と VGGT の実行方法、入力条件、パラメータ、出力ファイルを説明します。商用利用では `run_vggt_commercial.py` を使います。環境構築が終わっていない場合は先に [会社 PC 向け Windows 環境構築ガイド](WINDOWS_BEGINNER_SETUP.md) を実行します。
 
 ## 1. 入力画像を用意する
 
@@ -15,13 +15,19 @@ C:\work\scene01\
 
 画像は同じ場所を異なる位置から撮影したものを使います。被写体がほとんど重ならない画像、強いブレ、撮影途中で大きく変形した被写体では、カメラ姿勢と点群が崩れます。
 
+以降のコマンドでは、Miniforge が導入した Conda を明示的に使います。PowerShell を開き直して `conda` コマンドが認識されない場合でも動作します。
+
+```powershell
+$Conda = Join-Path $env:USERPROFILE "miniforge3\Scripts\conda.exe"
+```
+
 ## 2. 最初の MDA DA3 実行
 
 まず 2〜5 枚の画像で動作確認します。
 
 ```powershell
-Set-Location C:\aokiDev\MDA_ai
-C:\Users\aokim\miniforge3\Scripts\conda.exe run -n mda python python_mda_customScript\run_mda_da3.py -i C:\work\scene01 --oom-action lower-size --retry-size 384
+Set-Location C:\work\MDA_ai
+& $Conda run -n mda python python_mda_customScript\run_mda_da3.py -i C:\work\scene01 --oom-action lower-size --retry-size 384
 ```
 
 `--max-chunk` は指定しません。既定の `0` は全画像を同じ forward に入れるため、画像間の相対カメラ推定を維持します。CUDA out of memory が起きた場合だけ、解像度を 384 に下げて 1 回再試行します。
@@ -45,22 +51,16 @@ C:\Users\aokim\miniforge3\Scripts\conda.exe run -n mda python python_mda_customS
 
 `--conf-thres` は絶対値ではなく割合です。MDA DA3 の `80` は上位 80% を残し、下位 20% を除外します。
 
-## 4. VGGT を実行する
-
-非商用版は次です。
-
-```powershell
-Set-Location C:\aokiDev\MDA_ai
-C:\Users\aokim\miniforge3\Scripts\conda.exe run -n mda python python_mda_customScript\run_vggt.py -i C:\work\scene01
-```
+## 4. 商用 VGGT を実行する
 
 商用モデルの規約同意と認証が完了している場合は、次を使います。
 
 ```powershell
-C:\Users\aokim\miniforge3\Scripts\conda.exe run -n mda python python_mda_customScript\run_vggt_commercial.py -i C:\work\scene01
+Set-Location C:\work\MDA_ai
+& $Conda run -n mda python python_mda_customScript\run_vggt_commercial.py -i C:\work\scene01
 ```
 
-初回はモデル重みの取得に時間がかかります。商用版は認証が完了していないと `Access denied` で終了します。
+初回はモデル重みの取得に時間がかかります。商用版は認証が完了していないと `Access denied` で終了します。商用モデルは Meta の VGGT を直接実行します。MDA の MoG 深度モデルを重ねて実行する経路ではありません。
 
 ## 5. VGGT のパラメータ
 
