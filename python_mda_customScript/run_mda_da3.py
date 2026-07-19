@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-MDA DA3 reconstruction script.
+MDA reconstruction script for the DA3 and VGGT backbones.
 
 This script mirrors the VGGT custom script's command-line shape, progress
-markers, and output filenames while using the MDA DA3 checkpoint.
+markers, and JSON/GLB contract while using an MDA checkpoint.
 """
 
 from __future__ import annotations
@@ -82,7 +82,6 @@ from PIL import Image  # noqa: E402
 from depth_anything_3.model.utils.transform import pose_encoding_to_extri_intri  # noqa: E402
 from depth_anything_3.utils.export.glb import (  # noqa: E402
     _add_cameras_to_scene,
-    _compute_alignment_transform_first_cam_glTF_center_by_points,
     _depths_to_world_points_with_colors,
     _estimate_scene_scale,
     _filter_and_downsample,
@@ -103,7 +102,7 @@ RGB_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="MDA DA3 3D再構成スクリプト（VGGT JSON互換）",
+        description="MDA 3D再構成スクリプト（DA3/VGGTバックボーン、VGGT JSON互換）",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
@@ -180,8 +179,16 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--model-name",
-        default="mda_mog_sky_l2",
+        default=os.environ.get("MDA_DEFAULT_MODEL_NAME", "mda_mog_sky_l2"),
         help="src/testing/utils/model_choice.py のモデル名",
+    )
+    parser.add_argument(
+        "--output-tag",
+        default=os.environ.get("MDA_DEFAULT_OUTPUT_TAG", ""),
+        help=(
+            "出力ファイル名に付ける識別子。"
+            "例: mda_vggt -> reconstructed_scene_mda_vggt.glb"
+        ),
     )
     parser.add_argument(
         "--env-name",
@@ -205,20 +212,36 @@ def parse_args() -> argparse.Namespace:
         parser.error("--retry-size must be a positive integer")
     if not 0.0 <= args.conf_thres <= 100.0:
         parser.error("--conf-thres must be between 0 and 100")
+    if any(separator in args.output_tag for separator in ("/", "\\")) or args.output_tag in (".", ".."):
+        parser.error("--output-tag must be a file-name-safe tag, not a path")
     return args
+
+
+def model_display_name(model_name: str) -> str:
+    if model_name == "vggt_mog_l2":
+        return "MDA VGGT"
+    if model_name == "mda_mog_sky_l2":
+        return "MDA DA3"
+    return f"MDA ({model_name})"
+
+
+def tagged_output_name(base_name: str, extension: str, output_tag: str) -> str:
+    suffix = f"_{output_tag}" if output_tag else ""
+    return f"{base_name}{suffix}.{extension}"
 
 
 def print_config(args: argparse.Namespace, total_images: int, selected_images: int) -> None:
     line = "=" * 68
     print()
     print(line)
-    print("  MDA DA3 3D再構成  実行設定")
+    print(f"  {model_display_name(args.model_name)} 3D再構成  実行設定")
     print(line)
     print(f"  MDA root              : {MDA_ROOT}")
     print(f"  入力画像フォルダ      : {args.image_folder}")
     print(f"  検出した画像枚数      : {total_images} 枚")
     print(f"  使用する画像枚数      : {selected_images} 枚")
     print(f"  使用モデル            : {args.model_name}")
+    print(f"  出力識別子            : {args.output_tag or '(従来名)'}")
     print(f"  想定conda環境         : {args.env_name}")
     print(f"  推論サイズ            : {args.size}")
     print(f"  OOM時動作             : {args.oom_action}")
@@ -252,11 +275,16 @@ def check_environment(args: argparse.Namespace) -> None:
         print(f"   CUDA                 : 使用可能 ({torch.cuda.get_device_name(0)})")
     else:
         print("   CUDA                 : 使用不可 (CPUで実行)")
-    ckpt_path = MDA_ROOT / "checkpoints" / "MDA" / "DA3_MOG_Sky_LogL2.ckpt"
-    if args.model_name == "mda_mog_sky_l2" and not ckpt_path.is_file():
+    checkpoint_names = {
+        "mda_mog_sky_l2": "DA3_MOG_Sky_LogL2.ckpt",
+        "vggt_mog_l2": "VGGT_MOG_LogL2.ckpt",
+    }
+    checkpoint_name = checkpoint_names.get(args.model_name)
+    ckpt_path = MDA_ROOT / "checkpoints" / "MDA" / checkpoint_name if checkpoint_name else None
+    if ckpt_path is not None and not ckpt_path.is_file():
         raise FileNotFoundError(
-            f"DA3 MDA checkpoint not found: {ckpt_path}. "
-            "Run scripts/setup_windows_mda_da3.ps1 first."
+            f"MDA checkpoint not found: {ckpt_path}. "
+            "Download the official sy000/MDA checkpoint first."
         )
 
 
@@ -308,8 +336,9 @@ def merge_predictions(chunks: list[dict]) -> dict:
 
 
 def run_mda_inference(args: argparse.Namespace, image_paths: list[str]) -> dict:
-    emit_progress("model_load", 0.10, "MDA DA3モデルを読み込み中")
-    print("▶ MDA DA3モデルを初期化・読み込み中...")
+    display_name = model_display_name(args.model_name)
+    emit_progress("model_load", 0.10, f"{display_name}モデルを読み込み中")
+    print(f"▶ {display_name}モデルを初期化・読み込み中...")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     loaded = choose_model(args.model_name)
@@ -322,7 +351,7 @@ def run_mda_inference(args: argparse.Namespace, image_paths: list[str]) -> dict:
 
     emit_progress("infer", 0.30, "AI推論を実行中")
     print("▶ AI推論を実行中...")
-    print("※ MDA DA3 Giant は大きなモデルです。数十秒から数分かかる場合があります。")
+    print(f"※ {display_name} は大きなモデルです。数十秒から数分かかる場合があります。")
 
     start = time.time()
     chunk_predictions = []
@@ -391,6 +420,36 @@ def extract_depth_conf_images(predictions: dict, num_views: int):
     return depth_np, conf_np, colors
 
 
+def as_homogeneous_4x4(extrinsic: np.ndarray) -> np.ndarray:
+    if extrinsic.shape == (4, 4):
+        return extrinsic
+    if extrinsic.shape == (3, 4):
+        result = np.eye(4, dtype=extrinsic.dtype)
+        result[:3, :4] = extrinsic
+        return result
+    raise ValueError(f"extrinsic must be (3,4) or (4,4), got {extrinsic.shape}")
+
+
+def compute_vggt_scene_alignment(ext_w2c0: np.ndarray) -> np.ndarray:
+    """Match VGGT visual_util.py scene alignment exactly.
+
+    3D_ProjectionTest reads JSON extrinsics in the raw OpenCV world, then applies
+    the same alignment on the app side. The GLB must therefore use the VGGT
+    transform without DA3's point-cloud-centering step.
+    """
+    e0 = as_homogeneous_4x4(ext_w2c0).astype(np.float64)
+
+    c_gl = np.eye(4, dtype=np.float64)
+    c_gl[1, 1] = -1.0
+    c_gl[2, 2] = -1.0
+
+    r_y180 = np.eye(4, dtype=np.float64)
+    r_y180[0, 0] = -1.0
+    r_y180[2, 2] = -1.0
+
+    return np.linalg.inv(e0) @ c_gl @ r_y180
+
+
 def extract_w2c_intrinsics(predictions: dict, num_views: int, image_hw: tuple[int, int]):
     emit_progress("camera_calc", 0.75, "カメラパラメータ計算中")
     print("▶ カメラパラメータ（外部・内部行列）を計算中...")
@@ -410,6 +469,7 @@ def extract_w2c_intrinsics(predictions: dict, num_views: int, image_hw: tuple[in
         intr_np = intr_np[:num_views].astype(np.float64)
         w2c = np.tile(np.eye(4, dtype=np.float64), (num_views, 1, 1))
         w2c[:, : ext_np.shape[1], : ext_np.shape[2]] = ext_np
+        print("   カメラ行列ソース      : raw_preds.extrinsics (World-to-Camera)")
         return w2c, intr_np
 
     pose_enc = predictions.get("pose_enc")
@@ -422,6 +482,7 @@ def extract_w2c_intrinsics(predictions: dict, num_views: int, image_hw: tuple[in
     intr_np = tensor_to_numpy(intr_t)[0, :num_views].astype(np.float64)
     c2w = np.tile(np.eye(4, dtype=np.float64), (num_views, 1, 1))
     c2w[:, :3, :] = c2w_34_np
+    print("   カメラ行列ソース      : pose_enc fallback (Camera-to-Worldを反転)")
     return np.linalg.inv(c2w), intr_np
 
 
@@ -446,6 +507,7 @@ def write_camera_json(
     extrinsics_w2c: np.ndarray,
     processed_width: int,
     processed_height: int,
+    output_tag: str,
 ) -> str:
     all_cameras_data = {}
     for i, path in enumerate(image_paths):
@@ -460,7 +522,10 @@ def write_camera_json(
             "original_height": int(orig_h),
         }
 
-    out_path = os.path.join(image_folder, "all_cameras_parameters.json")
+    out_path = os.path.join(
+        image_folder,
+        tagged_output_name("all_cameras_parameters", "json", output_tag),
+    )
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(all_cameras_data, f, indent=4)
     print(f"OK: 全カメラパラメータのJSON保存完了 : {out_path}")
@@ -523,9 +588,7 @@ def build_glb(
         conf_for_filter,
         conf_thr,
     )
-    align = _compute_alignment_transform_first_cam_glTF_center_by_points(
-        extrinsics_w2c[0], points
-    )
+    align = compute_vggt_scene_alignment(extrinsics_w2c[0])
     if points.shape[0] > 0:
         points = trimesh.transform_points(points, align)
     points, point_colors = _filter_and_downsample(points, point_colors, args.num_max_points)
@@ -547,7 +610,10 @@ def build_glb(
             scale=scale,
         )
 
-    out_path = os.path.join(image_folder, "reconstructed_scene.glb")
+    out_path = os.path.join(
+        image_folder,
+        tagged_output_name("reconstructed_scene", "glb", args.output_tag),
+    )
     scene.export(out_path)
     elapsed = time.time() - start
     print(f"OK: GLB保存完了  : {out_path} (変換所要時間: {elapsed:.1f} 秒)")
@@ -612,6 +678,7 @@ def run_pipeline(args: argparse.Namespace, image_folder: str, all_image_paths: l
         extrinsics_w2c=extrinsics_w2c,
         processed_width=processed_width,
         processed_height=processed_height,
+        output_tag=args.output_tag,
     )
     glb_path = build_glb(
         args=args,

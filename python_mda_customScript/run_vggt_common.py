@@ -389,7 +389,11 @@ def main(model_id: str, model_display_name: str, commercial: bool) -> None:
     }
     predictions["extrinsic"] = extrinsic.detach().cpu().numpy().squeeze(0)
     predictions["intrinsic"] = intrinsic.detach().cpu().numpy().squeeze(0)
-    predictions["images"] = images.detach().cpu().numpy().squeeze(0)
+    image_array = images.detach().cpu().numpy()
+    # load_and_preprocess_images() returns [S, C, H, W] in the current VGGT
+    # package, while older variants return [1, S, C, H, W].  Preserve the
+    # sequence dimension and only remove an actual singleton batch dimension.
+    predictions["images"] = image_array[0] if image_array.shape[0] == 1 and image_array.ndim == 5 else image_array
     predictions["image_paths"] = image_paths
     emit_progress("world_unproj", 0.80, "深度マップから3D座標を計算中")
     predictions["world_points_from_depth"] = unproject_depth_map_to_point_map(
