@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import glob
-import json
 import os
 import site
 import sys
@@ -63,7 +62,6 @@ import numpy as np  # noqa: E402
 import requests  # noqa: E402
 import torch  # noqa: E402
 import trimesh  # noqa: E402
-from PIL import Image  # noqa: E402
 
 from depth_anything_3.utils.export.glb import (  # noqa: E402
     _add_cameras_to_scene,
@@ -309,27 +307,31 @@ def build_glb(
 def write_camera_json(
     image_folder: str,
     image_paths: list[str],
-    original_sizes: dict[str, tuple[int, int]],
     intrinsics: np.ndarray,
     extrinsics: np.ndarray,
     width: int,
     height: int,
+    model_id: str,
 ) -> str:
-    output = {}
-    for index, image_path in enumerate(image_paths):
-        name = Path(image_path).name
-        original_width, original_height = original_sizes[name]
-        output[name] = {
-            "intrinsics": intrinsics[index].tolist(),
-            "extrinsics": extrinsics[index].tolist(),
-            "width": int(width),
-            "height": int(height),
-            "original_width": int(original_width),
-            "original_height": int(original_height),
-        }
+    from camera_parameters_json import (
+        build_vggt_image_transforms,
+        write_camera_parameters_json,
+    )
+
     out_path = os.path.join(image_folder, "all_cameras_parameters.json")
-    with open(out_path, "w", encoding="utf-8") as file:
-        json.dump(output, file, indent=4)
+    write_camera_parameters_json(
+        out_path,
+        image_paths,
+        intrinsics,
+        extrinsics,
+        width,
+        height,
+        build_vggt_image_transforms(image_paths, width, height),
+        provider="vggt",
+        model_id=model_id,
+        intrinsics_source="predicted_fov",
+        principal_point_source="fixed_image_center",
+    )
     return out_path
 
 
@@ -362,11 +364,6 @@ def main(model_id: str, model_display_name: str, commercial: bool) -> None:
         raise SystemExit(1)
     print_config(args, len(image_paths), model_id, commercial)
     check_environment(args)
-    original_sizes = {}
-    for image_path in image_paths:
-        with Image.open(image_path) as image:
-            original_sizes[Path(image_path).name] = (image.width, image.height)
-
     model, device = load_model(model_id, model_display_name, commercial)
     emit_progress("preprocess", 0.20, f"画像を前処理中 ({len(image_paths)}枚)")
     images = load_and_preprocess_images(image_paths).to(device)
@@ -400,7 +397,7 @@ def main(model_id: str, model_display_name: str, commercial: bool) -> None:
         predictions["depth"], predictions["extrinsic"], predictions["intrinsic"]
     )
 
-    json_path = write_camera_json(args.image_folder, image_paths, original_sizes, predictions["intrinsic"], predictions["extrinsic"], width, height)
+    json_path = write_camera_json(args.image_folder, image_paths, predictions["intrinsic"], predictions["extrinsic"], width, height, model_id)
     emit_progress("save_json", 0.85, "カメラJSON保存完了")
     emit_progress("save_glb", 0.90, "GLBファイルを生成中")
     glb_path = build_glb(args, args.image_folder, predictions, width, height)

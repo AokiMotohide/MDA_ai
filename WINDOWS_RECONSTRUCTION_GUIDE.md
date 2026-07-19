@@ -82,10 +82,10 @@ MDA DA3 と VGGT では `--conf-thres` の意味が逆です。MDA DA3 の `80` 
 
 | ファイル | 内容 |
 |---|---|
-| `all_cameras_parameters.json` | カメラ内部行列、World-to-Camera 外部行列、処理解像度、元画像解像度 |
+| `all_cameras_parameters.json` | Camera Parameters v2。内部行列、World-to-Camera外部行列、解像度に加え、画像前処理変換、歪みモデル、GLB基準のcamera-to-scene、推定元情報を保存 |
 | `reconstructed_scene.glb` | 点群と任意のカメラ可視化を含む GLB |
 
-カメラ JSON は `intrinsics`、`extrinsics`、`width`、`height`、`original_width`、`original_height` の VGGT 互換形式です。
+カメラJSONは従来の6項目を維持したCamera Parameters v2です。旧読込側は追加項目を無視でき、新読込側は不足項目へ既定値を設定します。
 
 ## 7. 実行結果が崩れる場合の判断
 

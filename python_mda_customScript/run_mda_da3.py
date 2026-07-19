@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import glob
-import json
 import os
 import site
 import sys
@@ -77,7 +76,6 @@ os.chdir(MDA_ROOT)
 
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
-from PIL import Image  # noqa: E402
 
 from depth_anything_3.model.utils.transform import pose_encoding_to_extri_intri  # noqa: E402
 from depth_anything_3.utils.export.glb import (  # noqa: E402
@@ -305,14 +303,6 @@ def select_image_subset(image_paths: list[str], max_images: int) -> list[str]:
     return [image_paths[i] for i in indices]
 
 
-def load_original_sizes(image_paths: list[str]) -> dict[str, tuple[int, int]]:
-    sizes: dict[str, tuple[int, int]] = {}
-    for path in image_paths:
-        with Image.open(path) as img:
-            sizes[os.path.basename(path)] = (img.width, img.height)
-    return sizes
-
-
 def merge_predictions(chunks: list[dict]) -> dict:
     if len(chunks) == 1:
         return chunks[0]
@@ -384,6 +374,10 @@ def run_mda_inference(args: argparse.Namespace, image_paths: list[str]) -> dict:
             torch.cuda.empty_cache()
 
     predictions = merge_predictions(chunk_predictions)
+    predictions["_camera_preprocess"] = {
+        "size": int(args.size),
+        "patch_size": int(loaded.patch_size),
+    }
     elapsed = time.time() - start
     print(f"OK: 推論完了 (AI計算の所要時間: {elapsed:.1f} 秒)")
     emit_progress("infer_done", 0.70, f"推論完了 ({elapsed:.1f}s)")
@@ -470,7 +464,7 @@ def extract_w2c_intrinsics(predictions: dict, num_views: int, image_hw: tuple[in
         w2c = np.tile(np.eye(4, dtype=np.float64), (num_views, 1, 1))
         w2c[:, : ext_np.shape[1], : ext_np.shape[2]] = ext_np
         print("   カメラ行列ソース      : raw_preds.extrinsics (World-to-Camera)")
-        return w2c, intr_np
+        return w2c, intr_np, "raw_predictions", "estimated"
 
     pose_enc = predictions.get("pose_enc")
     if pose_enc is None:
@@ -483,7 +477,7 @@ def extract_w2c_intrinsics(predictions: dict, num_views: int, image_hw: tuple[in
     c2w = np.tile(np.eye(4, dtype=np.float64), (num_views, 1, 1))
     c2w[:, :3, :] = c2w_34_np
     print("   カメラ行列ソース      : pose_enc fallback (Camera-to-Worldを反転)")
-    return np.linalg.inv(c2w), intr_np
+    return np.linalg.inv(c2w), intr_np, "pose_encoding", "fixed_image_center"
 
 
 def extract_sky_mask(predictions: dict, num_views: int) -> np.ndarray | None:
@@ -502,32 +496,45 @@ def extract_sky_mask(predictions: dict, num_views: int) -> np.ndarray | None:
 def write_camera_json(
     image_folder: str,
     image_paths: list[str],
-    original_sizes: dict[str, tuple[int, int]],
     intrinsics: np.ndarray,
     extrinsics_w2c: np.ndarray,
     processed_width: int,
     processed_height: int,
     output_tag: str,
+    preprocess_size: int,
+    patch_size: int,
+    model_id: str,
+    intrinsics_source: str,
+    principal_point_source: str,
 ) -> str:
-    all_cameras_data = {}
-    for i, path in enumerate(image_paths):
-        image_name = os.path.basename(path)
-        orig_w, orig_h = original_sizes[image_name]
-        all_cameras_data[image_name] = {
-            "intrinsics": intrinsics[i].tolist(),
-            "extrinsics": extrinsics_w2c[i, :3, :4].tolist(),
-            "width": int(processed_width),
-            "height": int(processed_height),
-            "original_width": int(orig_w),
-            "original_height": int(orig_h),
-        }
+    from camera_parameters_json import (
+        build_mda_image_transforms,
+        write_camera_parameters_json,
+    )
 
     out_path = os.path.join(
         image_folder,
         tagged_output_name("all_cameras_parameters", "json", output_tag),
     )
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(all_cameras_data, f, indent=4)
+    write_camera_parameters_json(
+        out_path,
+        image_paths,
+        intrinsics,
+        extrinsics_w2c,
+        processed_width,
+        processed_height,
+        build_mda_image_transforms(
+            image_paths,
+            preprocess_size,
+            patch_size,
+            processed_width,
+            processed_height,
+        ),
+        provider="mda",
+        model_id=model_id,
+        intrinsics_source=intrinsics_source,
+        principal_point_source=principal_point_source,
+    )
     print(f"OK: 全カメラパラメータのJSON保存完了 : {out_path}")
     emit_progress("save_json", 0.85, "カメラJSON保存完了")
     return out_path
@@ -655,12 +662,11 @@ def run_pipeline(args: argparse.Namespace, image_folder: str, all_image_paths: l
     print_config(args, len(all_image_paths), len(image_paths))
     check_environment(args)
 
-    original_sizes = load_original_sizes(image_paths)
     predictions = run_mda_inference(args, image_paths)
 
     depth, conf, colors = extract_depth_conf_images(predictions, len(image_paths))
     processed_height, processed_width = depth.shape[1:]
-    extrinsics_w2c, intrinsics = extract_w2c_intrinsics(
+    extrinsics_w2c, intrinsics, intrinsics_source, principal_point_source = extract_w2c_intrinsics(
         predictions, len(image_paths), (processed_height, processed_width)
     )
     sky_mask = extract_sky_mask(predictions, len(image_paths)) if args.mask_sky else None
@@ -673,12 +679,16 @@ def run_pipeline(args: argparse.Namespace, image_folder: str, all_image_paths: l
     json_path = write_camera_json(
         image_folder=image_folder,
         image_paths=image_paths,
-        original_sizes=original_sizes,
         intrinsics=intrinsics,
         extrinsics_w2c=extrinsics_w2c,
         processed_width=processed_width,
         processed_height=processed_height,
         output_tag=args.output_tag,
+        preprocess_size=predictions["_camera_preprocess"]["size"],
+        patch_size=predictions["_camera_preprocess"]["patch_size"],
+        model_id=args.model_name,
+        intrinsics_source=intrinsics_source,
+        principal_point_source=principal_point_source,
     )
     glb_path = build_glb(
         args=args,

@@ -48,4 +48,4 @@ conda run -n mda python python_mda_customScript\run_vggt_commercial.py -i my_ima
 
 出力は入力フォルダ直下の `all_cameras_parameters.json` と
 `reconstructed_scene.glb`。JSON は `intrinsics`、`extrinsics`、`width`、
-`height`、`original_width`、`original_height` だけを持つ VGGT 互換形式である。
+`height`、`original_width`、`original_height` を後方互換で維持した Camera Parameters v2である。画像前処理変換、歪みモデル、GLB基準のcamera-to-scene、推定元情報も保存する。
